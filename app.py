@@ -140,13 +140,19 @@ for msg in st.session_state.messages:
 
 # 2. 사용자 입력 처리
 if prompt := st.chat_input("질문을 입력하세요..."):
+    # 1. 사용자의 질문을 리스트에 추가
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): 
         st.markdown(prompt)
 
-    # 🚨 이 부분부터 들여쓰기 간격이 정확히 맞아야 합니다 (기존 코드에서 밀려있던 부분)
+    # ✨ [이곳이 명당!] 토큰 다이어트를 위해 대화 기록을 10개로 제한
+    if len(st.session_state.messages) > 10:
+        st.session_state.messages = st.session_state.messages[-10:]
+
+    # 2. 이제 AI가 답변을 준비합니다 (제한된 10개의 대화 맥락만 참고함)
     with st.chat_message("assistant"):
         with st.spinner("전문 지식을 분석 중입니다..."):
+            # ... (이후 모델 전환 및 답변 생성 로직)
             
             models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
             final_answer = ""
