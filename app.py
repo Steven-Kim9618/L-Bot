@@ -87,7 +87,7 @@ def get_legal_theory(query: str) -> str:
             contents=query,
             config=types.EmbedContentConfig(output_dimensionality=768)
         )
-        results = index.query(vector=res_embed.embeddings[0].values, top_k=3, include_metadata=True)
+        results = index.query(vector=res_embed.embeddings[0].values, top_k=5, include_metadata=True)
         return "\n".join([f"[{m['metadata'].get('source')}] {m['metadata'].get('text')}" for m in results['matches']])
     except: return "교재 검색 실패"
 
