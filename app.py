@@ -140,37 +140,35 @@ if prompt := st.chat_input("질문을 입력하세요..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
-    with st.chat_message("assistant"):
+   with st.chat_message("assistant"):
         with st.spinner("전문 지식을 분석 중입니다..."):
             
-            # 1. 사용할 모델 후보 리스트 설정
             models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
-            max_retries_per_model = 2 # 각 모델당 2번씩 시도 (총 4번)
             final_answer = ""
             active_model = ""
 
-            # 2. 모델 리스트를 순회하며 시도
             for model_name in models_to_try:
                 active_model = model_name
                 success = False
                 
-                for attempt in range(max_retries_per_model):
-                    try:
-                        # 현재 시도 중인 모델로 세션의 모델 정보를 임시 변경하여 전송
-                        # (chat_session 생성 시 모델이 고정되어 있으므로, 
-                        # send_message 시점에 config를 통해 모델을 지정하거나 세션을 새로 파야 할 수 있지만, 
-                        # 여기서는 단순화를 위해 세션 생성 시의 모델 변수를 활용하는 방식으로 설명합니다.)
-                        
-                        # 💡 팁: chat_session의 모델을 직접 바꿀 수 없으므로 
-                        # 실제로는 세션을 재생성하거나 send_message의 개별 호출 방식을 씁니다.
-                        # 가장 확실한 방법은 아래처럼 '모델' 이름만 바꿔서 재호출하는 것입니다.
-                        
-                        response = st.session_state.chat_session.send_message(
-                            prompt,
-                            config=types.GenerateContentConfig(model=active_model) # 모델 동적 지정
+                # 💡 모델별 전용 세션 생성 (없을 경우에만)
+                session_key = f"chat_{active_model.replace('-', '_')}"
+                if session_key not in st.session_state:
+                    st.session_state[session_key] = client.chats.create(
+                        model=active_model,
+                        config=types.GenerateContentConfig(
+                            system_instruction=sys_instruct,
+                            tools=[get_case_law, search_cases_by_keyword, get_legal_theory],
+                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False)
                         )
+                    )
+
+                # 최대 2번 시도
+                for attempt in range(2):
+                    try:
+                        # 💡 해당 모델의 세션을 사용하여 메시지 전송
+                        response = st.session_state[session_key].send_message(prompt)
                         
-                        # 응답 텍스트 추출
                         if response.text:
                             final_answer = response.text
                         else:
@@ -180,24 +178,22 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                         
                         if final_answer:
                             success = True
-                            break # 시도 루프 탈출
+                            break
                             
                     except Exception as e:
                         if "503" in str(e) or "429" in str(e):
-                            time.sleep(1.5) # 서버 부하 시 잠시 대기
+                            time.sleep(1.5)
                             continue
                         else:
-                            st.error(f"오류 발생: {e}")
+                            # 다른 에러면 즉시 중단
                             break
                 
-                if success: break # 모델 순회 루프 탈출
+                if success: break
 
-            # 3. 화면 출력
+            # 최종 출력
             if final_answer:
-                # 어떤 모델이 응답했는지 상단에 작게 표시
                 model_label = "💎 Pro" if "pro" in active_model else "⚡ Flash"
                 st.caption(f"🤖 **{model_label}** 모델이 답변을 생성했습니다.")
-                
                 st.markdown(final_answer)
                 st.session_state.messages.append({"role": "assistant", "content": final_answer})
             else:
