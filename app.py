@@ -130,17 +130,22 @@ if "chat_session" not in st.session_state:
         )
     )
 
+# 1. 메시지 초기화 및 화면 표시
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    with st.chat_message(msg["role"]): 
+        st.markdown(msg["content"])
 
+# 2. 사용자 입력 처리
 if prompt := st.chat_input("질문을 입력하세요..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"): 
+        st.markdown(prompt)
 
-   with st.chat_message("assistant"):
+    # 🚨 이 부분부터 들여쓰기 간격이 정확히 맞아야 합니다 (기존 코드에서 밀려있던 부분)
+    with st.chat_message("assistant"):
         with st.spinner("전문 지식을 분석 중입니다..."):
             
             models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
@@ -151,7 +156,7 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                 active_model = model_name
                 success = False
                 
-                # 💡 모델별 전용 세션 생성 (없을 경우에만)
+                # 💡 모델별 전용 세션 생성
                 session_key = f"chat_{active_model.replace('-', '_')}"
                 if session_key not in st.session_state:
                     st.session_state[session_key] = client.chats.create(
@@ -166,7 +171,6 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                 # 최대 2번 시도
                 for attempt in range(2):
                     try:
-                        # 💡 해당 모델의 세션을 사용하여 메시지 전송
                         response = st.session_state[session_key].send_message(prompt)
                         
                         if response.text:
@@ -182,10 +186,10 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                             
                     except Exception as e:
                         if "503" in str(e) or "429" in str(e):
+                            import time
                             time.sleep(1.5)
                             continue
                         else:
-                            # 다른 에러면 즉시 중단
                             break
                 
                 if success: break
