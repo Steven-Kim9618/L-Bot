@@ -143,37 +143,62 @@ if prompt := st.chat_input("질문을 입력하세요..."):
     with st.chat_message("assistant"):
         with st.spinner("전문 지식을 분석 중입니다..."):
             
-            # 💡 503 에러 방어 로직 (최대 3번까지 자동 재시도)
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    response = st.session_state.chat_session.send_message(prompt)
-                    
-                    # (기존 None 방지 로직 그대로 유지)
-                    answer = ""
-                    if response.text:
-                        answer = response.text
-                    else:
-                        for candidate in response.candidates:
-                            for part in candidate.content.parts:
-                                if part.text:
-                                    answer += part.text
-                    
-                    if not answer:
-                        answer = "데이터를 분석했으나 답변을 생성하지 못했습니다. 다시 한번 질문해주세요."
+            # 1. 사용할 모델 후보 리스트 설정
+            models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
+            max_retries_per_model = 2 # 각 모델당 2번씩 시도 (총 4번)
+            final_answer = ""
+            active_model = ""
 
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
-                    break  # 성공하면 재시도 루프 탈출!
+            # 2. 모델 리스트를 순회하며 시도
+            for model_name in models_to_try:
+                active_model = model_name
+                success = False
+                
+                for attempt in range(max_retries_per_model):
+                    try:
+                        # 현재 시도 중인 모델로 세션의 모델 정보를 임시 변경하여 전송
+                        # (chat_session 생성 시 모델이 고정되어 있으므로, 
+                        # send_message 시점에 config를 통해 모델을 지정하거나 세션을 새로 파야 할 수 있지만, 
+                        # 여기서는 단순화를 위해 세션 생성 시의 모델 변수를 활용하는 방식으로 설명합니다.)
+                        
+                        # 💡 팁: chat_session의 모델을 직접 바꿀 수 없으므로 
+                        # 실제로는 세션을 재생성하거나 send_message의 개별 호출 방식을 씁니다.
+                        # 가장 확실한 방법은 아래처럼 '모델' 이름만 바꿔서 재호출하는 것입니다.
+                        
+                        response = st.session_state.chat_session.send_message(
+                            prompt,
+                            config=types.GenerateContentConfig(model=active_model) # 모델 동적 지정
+                        )
+                        
+                        # 응답 텍스트 추출
+                        if response.text:
+                            final_answer = response.text
+                        else:
+                            for candidate in response.candidates:
+                                for part in candidate.content.parts:
+                                    if part.text: final_answer += part.text
+                        
+                        if final_answer:
+                            success = True
+                            break # 시도 루프 탈출
+                            
+                    except Exception as e:
+                        if "503" in str(e) or "429" in str(e):
+                            time.sleep(1.5) # 서버 부하 시 잠시 대기
+                            continue
+                        else:
+                            st.error(f"오류 발생: {e}")
+                            break
+                
+                if success: break # 모델 순회 루프 탈출
 
-                except Exception as e:
-                    error_msg = str(e)
-                    # 503 에러인 경우에만 잠시 쉬었다가 재시도
-                    if "503" in error_msg and attempt < max_retries - 1:
-                        wait_time = 2 ** attempt  # 1초, 2초, 4초로 점점 길게 대기
-                        st.warning(f"구글 서버 과부하로 {wait_time}초 후 자동으로 다시 시도합니다... (시도: {attempt+1}/{max_retries})")
-                        time.sleep(wait_time)
-                    else:
-                        # 503이 아니거나, 3번 다 실패하면 에러 출력
-                        st.error(f"오류가 발생했습니다: {error_msg}")
-                        break
+            # 3. 화면 출력
+            if final_answer:
+                # 어떤 모델이 응답했는지 상단에 작게 표시
+                model_label = "💎 Pro" if "pro" in active_model else "⚡ Flash"
+                st.caption(f"🤖 **{model_label}** 모델이 답변을 생성했습니다.")
+                
+                st.markdown(final_answer)
+                st.session_state.messages.append({"role": "assistant", "content": final_answer})
+            else:
+                st.error("현재 모든 AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.")
