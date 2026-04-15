@@ -32,7 +32,7 @@ def check_password():
         st.session_state["password_correct"] = False
 
     if not st.session_state["password_correct"]:
-        st.warning("✋ 지인 전용 봇입니다. 비밀번호를 입력하세요.")
+        st.warning("비밀번호를 입력하세요.")
         pwd = st.text_input("비밀번호", type="password")
         
         if pwd == st.secrets["APP_PASSWORD"]:
