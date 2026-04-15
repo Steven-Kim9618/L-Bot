@@ -150,9 +150,11 @@ if prompt := st.chat_input("질문을 입력하세요..."):
         st.session_state.messages = st.session_state.messages[-10:]
 
     # 2. 이제 AI가 답변을 준비합니다 (제한된 10개의 대화 맥락만 참고함)
+    # 🚨 들여쓰기 기준선: 이 코드는 with st.chat_message("assistant"): 블록 안쪽입니다.
     with st.chat_message("assistant"):
-        with st.spinner("전문 지식을 분석 중입니다..."):
-            # ... (이후 모델 전환 및 답변 생성 로직)
+        
+        # 💡 st.spinner 대신 st.status를 사용하면 글씨를 실시간으로 바꿀 수 있습니다!
+        with st.status("💎 Pro 모델로 분석을 시작합니다...", expanded=False) as status:
             
             models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
             final_answer = ""
@@ -162,7 +164,13 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                 active_model = model_name
                 success = False
                 
-                # 💡 모델별 전용 세션 생성
+                # ✨ 실시간 상태 메시지 업데이트
+                if "pro" in active_model:
+                    status.update(label="💎 Pro 모델(고지능) 서버에 연결하여 답변을 생성 중...", state="running")
+                else:
+                    status.update(label="⚡ Pro 서버 지연으로 Flash 모델(고속)로 전환하여 재시도 중...", state="running")
+                
+                # 모델별 전용 세션 생성
                 session_key = f"chat_{active_model.replace('-', '_')}"
                 if session_key not in st.session_state:
                     st.session_state[session_key] = client.chats.create(
@@ -179,15 +187,18 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                     try:
                         response = st.session_state[session_key].send_message(prompt)
                         
+                        # 중복 방지를 위해 최종 텍스트만 가져오기
                         if response.text:
                             final_answer = response.text
                         else:
-                            for candidate in response.candidates:
-                                for part in candidate.content.parts:
-                                    if part.text: final_answer += part.text
+                            temp_parts = [part.text for part in response.candidates[0].content.parts if part.text]
+                            if temp_parts:
+                                final_answer = temp_parts[-1]
                         
                         if final_answer:
                             success = True
+                            # ✨ 성공 시 상태창을 초록색 체크마크로 변경
+                            status.update(label=f"✅ {active_model} 모델로 답변 생성 완료!", state="complete")
                             break
                             
                     except Exception as e:
@@ -199,12 +210,18 @@ if prompt := st.chat_input("질문을 입력하세요..."):
                             break
                 
                 if success: break
+            
+            # 모든 시도가 실패했을 때의 상태창 처리
+            if not success:
+                status.update(label="❌ 모든 AI 서버가 응답하지 않습니다.", state="error")
 
-            # 최종 출력
-            if final_answer:
-                model_label = "💎 Pro" if "pro" in active_model else "⚡ Flash"
-                st.caption(f"🤖 **{model_label}** 모델이 답변을 생성했습니다.")
-                st.markdown(final_answer)
-                st.session_state.messages.append({"role": "assistant", "content": final_answer})
-            else:
-                st.error("현재 모든 AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.")
+        # ----------------------------------------------------
+        # 💬 상태창(status) 밖에서 최종 답변을 화면에 예쁘게 출력
+        # ----------------------------------------------------
+        if final_answer:
+            model_label = "💎 Pro" if "pro" in active_model else "⚡ Flash"
+            st.caption(f"🤖 **{model_label}** 모델이 답변을 생성했습니다.")
+            st.markdown(final_answer)
+            st.session_state.messages.append({"role": "assistant", "content": final_answer})
+        else:
+            st.error("현재 모든 AI 서버가 응답하지 않습니다. 하단의 '다시 답변 받기' 버튼을 눌러주세요.")
