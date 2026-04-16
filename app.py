@@ -92,30 +92,19 @@ def get_legal_theory(query: str) -> str:
     except: return "교재 검색 실패"
 
 # ==========================================
-# 🤖 3. 에이전트 로직 (None 방지 보강)
+# 🤖 3. 에이전트 로직 (유연한 답변 및 템플릿 제거)
 # ==========================================
 
 st.title("⚖️ Law-Bot: 민형사 AI by 김성민")
 
-# 시스템 지시문 강화: 답변을 끝까지 완성하라고 명시
+# 💡 수정됨: 강압적인 템플릿 요구를 지우고 상황에 맞게 대답하도록 지시
 sys_instruct = """
 당신은 대한민국 최고의 법률 AI 에이전트입니다.
-질문을 받으면 도구를 사용해 정보를 검색한 뒤, 반드시 아래의 마크다운 템플릿 구조를 그대로 복사하여 빈칸을 채우는 방식으로만 답변을 출력하세요. 
-다른 인사말이나 서론 없이 무조건 '### 1. 사건 개요 및 판결 요지'부터 출력을 시작해야 합니다.
+사용자의 질문 의도를 파악하여, 그에 맞는 형식으로 자유롭고 자연스럽게 답변하세요. 
+일상적인 대화에는 부드럽게 응답하고, 판례나 법리를 설명할 때는 가독성 좋게 논리적으로 구성하십시오. 억지로 특정 템플릿에 맞출 필요는 없습니다.
 
 [🚨 중요 규칙: 교재 데이터 절단 대응]
 교재 검색(get_legal_theory) 결과 문장이 불완전하게 잘려 있다면, 그 잘린 마지막 문장을 그대로 새로운 검색 쿼리(query)로 사용하여 'get_legal_theory'를 한 번 더 호출하세요. 이를 통해 끊긴 뒷부분의 문맥을 확보한 후 최종 답변을 작성해야 합니다. 절대 부족한 내용을 임의로 지어내지(Hallucination) 마십시오.
-
-### 1. 사건 개요 및 판결 요지
-- **사건번호:** ('get_case_law' 도구 검색 결과)
-- **사실관계:** (사건이 어떻게 발생했는지 구체적으로 기재)
-- **법원의 판단:** (인정된 범죄와 최종 판결 요지)
-
-### 2. 관련 핵심 법리 (교재 기준)
-- ('get_legal_theory' 도구 검색 결과를 바탕으로, 이 사건에 적용된 핵심 이론 상세 설명)
-
-### 3. 이론의 구체적 적용
-- (1번의 사실관계에 2번의 이론이 어떻게 적용되어 저런 판결이 나왔는지 종합적으로 논술)
 """
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = client.chats.create(
@@ -138,90 +127,76 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): 
         st.markdown(msg["content"])
 
-# 2. 사용자 입력 처리
+# 💡 2. 실행 트리거(Flag) 설정
+# 이 변수가 True가 될 때만 AI가 답변을 생성하도록 통제하여 버튼 먹통 현상을 막습니다.
+need_generation = False
+
+# 💡 3. 재시도 버튼 (명확하고 안정적인 위치)
+# 마지막 대화가 'user'의 질문으로 끝났다면 (즉, AI가 에러로 답변을 못 냈다면)
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    if st.button("🔄 에러 발생! 여기를 눌러 다시 답변 받기"):
+        need_generation = True  # 버튼을 누르면 생성 트리거 ON
+
+# 4. 사용자 입력 처리
 if prompt := st.chat_input("질문을 입력하세요..."):
-    # 1. 사용자의 질문을 리스트에 추가
+    # 질문을 저장하고 화면에 띄웁니다
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): 
         st.markdown(prompt)
-
-    # ✨ [이곳이 명당!] 토큰 다이어트를 위해 대화 기록을 10개로 제한
+    
+    # 토큰 절약 (최신 10개 유지)
     if len(st.session_state.messages) > 10:
         st.session_state.messages = st.session_state.messages[-10:]
-
-    # 2. 이제 AI가 답변을 준비합니다 (제한된 10개의 대화 맥락만 참고함)
-    # 🚨 들여쓰기 기준선: 이 코드는 with st.chat_message("assistant"): 블록 안쪽입니다.
-    with st.chat_message("assistant"):
         
-        # 💡 st.spinner 대신 st.status를 사용하면 글씨를 실시간으로 바꿀 수 있습니다!
-        with st.status("💎 Pro 모델로 분석을 시작합니다...", expanded=False) as status:
+    need_generation = True  # 새 질문이 들어와도 생성 트리거 ON
+
+# 5. AI 답변 생성 (Flash 모델 전용)
+if need_generation:
+    # 가장 마지막에 저장된 사용자의 질문을 가져옵니다.
+    current_prompt = st.session_state.messages[-1]["content"]
+
+    with st.chat_message("assistant"):
+        with st.status("⚡ Flash 모델이 법률 데이터를 분석 중입니다...", expanded=False) as status:
             
-            models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
             final_answer = ""
-            active_model = ""
-
-            for model_name in models_to_try:
-                active_model = model_name
-                success = False
-                
-                # ✨ 실시간 상태 메시지 업데이트
-                if "pro" in active_model:
-                    status.update(label="💎 Pro 모델(고지능) 서버에 연결하여 답변을 생성 중...", state="running")
-                else:
-                    status.update(label="⚡ Pro 서버 지연으로 Flash 모델(고속)로 전환하여 재시도 중...", state="running")
-                
-                # 모델별 전용 세션 생성
-                session_key = f"chat_{active_model.replace('-', '_')}"
-                if session_key not in st.session_state:
-                    st.session_state[session_key] = client.chats.create(
-                        model=active_model,
-                        config=types.GenerateContentConfig(
-                            system_instruction=sys_instruct,
-                            tools=[get_case_law, search_cases_by_keyword, get_legal_theory],
-                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False)
-                        )
-                    )
-
-                # 최대 2번 시도
-                for attempt in range(2):
-                    try:
-                        response = st.session_state[session_key].send_message(prompt)
-                        
-                        # 중복 방지를 위해 최종 텍스트만 가져오기
-                        if response.text:
-                            final_answer = response.text
-                        else:
-                            temp_parts = [part.text for part in response.candidates[0].content.parts if part.text]
-                            if temp_parts:
-                                final_answer = temp_parts[-1]
-                        
-                        if final_answer:
-                            success = True
-                            # ✨ 성공 시 상태창을 초록색 체크마크로 변경
-                            status.update(label=f"✅ {active_model} 모델로 답변 생성 완료!", state="complete")
-                            break
-                            
-                    except Exception as e:
-                        if "503" in str(e) or "429" in str(e):
-                            import time
-                            time.sleep(1.5)
-                            continue
-                        else:
-                            break
-                
-                if success: break
             
-            # 모든 시도가 실패했을 때의 상태창 처리
-            if not success:
-                status.update(label="❌ 모든 AI 서버가 응답하지 않습니다.", state="error")
+            # Flash 모델 전용 세션 생성 (없을 경우에만 1회 생성)
+            if "chat_session" not in st.session_state:
+                st.session_state.chat_session = client.chats.create(
+                    model="gemini-2.5-flash",
+                    config=types.GenerateContentConfig(
+                        system_instruction=sys_instruct,
+                        tools=[get_case_law, search_cases_by_keyword, get_legal_theory],
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False)
+                    )
+                )
 
-        # ----------------------------------------------------
-        # 💬 상태창(status) 밖에서 최종 답변을 화면에 예쁘게 출력
-        # ----------------------------------------------------
+            try:
+                # 메시지 전송 및 답변 수신
+                response = st.session_state.chat_session.send_message(current_prompt)
+                
+                # 답변 추출 (중복 방지)
+                if response.text:
+                    final_answer = response.text
+                else:
+                    temp_parts = [part.text for part in response.candidates[0].content.parts if part.text]
+                    if temp_parts:
+                        final_answer = temp_parts[-1]
+                
+                if final_answer:
+                    status.update(label="✅ 분석 완료!", state="complete")
+                else:
+                    status.update(label="❌ 답변을 생성하지 못했습니다. 버튼을 다시 눌러주세요.", state="error")
+                    
+            except Exception as e:
+                status.update(label=f"❌ 서버 오류 발생 (잠시 후 재시도 해주세요)", state="error")
+
+        # 6. 최종 답변 화면 출력 및 화면 새로고침
         if final_answer:
-            model_label = "💎 Pro" if "pro" in active_model else "⚡ Flash"
-            st.caption(f"🤖 **{model_label}** 모델이 답변을 생성했습니다.")
+            st.caption("🤖 **⚡ Flash** 모델이 답변을 생성했습니다.")
             st.markdown(final_answer)
+            # 성공적으로 답변을 받았으므로 대화 기록에 저장
             st.session_state.messages.append({"role": "assistant", "content": final_answer})
-        else:
-            st.error("현재 모든 AI 서버가 응답하지 않습니다. 하단의 '다시 답변 받기' 버튼을 눌러주세요.")
+            
+            # 💡 [핵심] 성공 후 화면을 즉시 새로고침하여 쓸모없어진 '재시도 버튼'을 숨깁니다.
+            st.rerun()
