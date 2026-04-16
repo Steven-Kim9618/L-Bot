@@ -13,14 +13,20 @@ import time
 st.set_page_config(page_title="L-Bot", page_icon="⚖️", layout="wide")
 
 # ==========================================
-# 🎨 폰트 및 UI 스타일 설정 (Pretendard 적용)
+# 🎨 폰트 및 UI 스타일 설정 (아이콘 깨짐 방지 적용)
 # ==========================================
 st.markdown("""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
 
-html, body, [class*="css"], [class*="st-"] {
-    font-family: 'Pretendard', sans-serif !important;
+/* 1. 앱 전체 기본 폰트를 프리텐다드로 적용 */
+.stApp, p, span, div, h1, h2, h3, h4, h5, h6, li, a {
+    font-family: 'Pretendard', sans-serif;
+}
+
+/* 2. 아이콘 폰트는 깨지지 않도록 원래 폰트를 강제 유지 (예외 처리) */
+.material-icons, .material-symbols-rounded, .material-symbols-outlined {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
 }
 </style>
 """, unsafe_allow_html=True)
