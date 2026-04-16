@@ -116,7 +116,6 @@ def get_legal_theory(query: str) -> str:
 
 st.title("⚖️ Law-Bot: 민형사 AI by 김성민")
 
-# 💡 수정됨: 강압적인 템플릿 요구를 지우고 상황에 맞게 대답하도록 지시
 sys_instruct = """
 당신은 대한민국 최고의 법률 AI 에이전트입니다.
 사용자의 질문 의도를 파악하여, 그에 맞는 형식으로 자유롭고 자연스럽게 답변하세요. 
@@ -130,15 +129,14 @@ sys_instruct = """
 [🚨 절대 규칙 2: 교재 데이터 절단 대응]
 교재 검색(get_legal_theory) 결과 문장이 불완전하게 잘려 있다면, 그 잘린 마지막 문장을 그대로 새로운 검색 쿼리(query)로 사용하여 'get_legal_theory'를 한 번 더 호출하세요. 이를 통해 끊긴 뒷부분의 문맥을 확보한 후 최종 답변을 작성해야 합니다. 절대 부족한 내용을 임의로 지어내지 마십시오.
 """
+
+# 💡 세션 초기화: 코드가 꼬이지 않도록 여기서 딱 한 번만 Pro 모델로 세팅합니다!
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = client.chats.create(
-        model="gemini-2.5-flash", # 테스트 중엔 무조건 flash!
+        model="gemini-2.5-pro",  # 💎 할루시네이션을 잡기 위해 강력한 Pro 모델로 변경!
         config=types.GenerateContentConfig(
             system_instruction=sys_instruct,
-            
-            # 💡 핵심 수정: 복잡한 설명서 다 지우고, 우리가 만든 진짜 파이썬 함수 3개를 그대로 넣습니다.
             tools=[get_case_law, search_cases_by_keyword, get_legal_theory],
-            
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False)
         )
     )
@@ -151,56 +149,41 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): 
         st.markdown(msg["content"])
 
-# 💡 2. 실행 트리거(Flag) 설정
-# 이 변수가 True가 될 때만 AI가 답변을 생성하도록 통제하여 버튼 먹통 현상을 막습니다.
+# 2. 실행 트리거(Flag) 설정
 need_generation = False
 
-# 💡 3. 재시도 버튼 (명확하고 안정적인 위치)
-# 마지막 대화가 'user'의 질문으로 끝났다면 (즉, AI가 에러로 답변을 못 냈다면)
+# 3. 재시도 버튼 (명확하고 안정적인 위치)
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     if st.button("🔄 에러 발생! 여기를 눌러 다시 답변 받기"):
-        need_generation = True  # 버튼을 누르면 생성 트리거 ON
+        need_generation = True  
 
 # 4. 사용자 입력 처리
 if prompt := st.chat_input("질문을 입력하세요..."):
-    # 질문을 저장하고 화면에 띄웁니다
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): 
         st.markdown(prompt)
     
-    # 토큰 절약 (최신 10개 유지)
     if len(st.session_state.messages) > 10:
         st.session_state.messages = st.session_state.messages[-10:]
         
-    need_generation = True  # 새 질문이 들어와도 생성 트리거 ON
+    need_generation = True  
 
-# 5. AI 답변 생성 (Flash 모델 전용, 3회 재시도 적용)
+# 5. AI 답변 생성 (Pro 모델, 3회 재시도 적용)
 if need_generation:
     current_prompt = st.session_state.messages[-1]["content"]
 
     with st.chat_message("assistant"):
-        with st.status("⚡ Flash 모델이 법률 데이터를 분석 중입니다... (시도 1/3)", expanded=False) as status:
+        # 💡 상태창 메시지도 Pro 모델에 맞게 수정
+        with st.status("💎 Pro 모델이 법률 데이터를 깊이 있게 분석 중입니다... (시도 1/3)", expanded=False) as status:
             
             final_answer = ""
             success = False
-            max_retries = 3  # 💡 최대 3번 시도!
+            max_retries = 3  
             
-            if "chat_session" not in st.session_state:
-                st.session_state.chat_session = client.chats.create(
-                    model="gemini-2.5-flash",
-                    config=types.GenerateContentConfig(
-                        system_instruction=sys_instruct,
-                        tools=[get_case_law, search_cases_by_keyword, get_legal_theory],
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False)
-                    )
-                )
-
-            # 💡 3번 물고 늘어지는 반복문 시작
             for attempt in range(max_retries):
                 try:
-                    # 두 번째 시도부터는 상태창 글씨 업데이트
                     if attempt > 0:
-                        status.update(label=f"⚡ 서버 지연으로 재시도 중입니다... (시도 {attempt+1}/{max_retries})", state="running")
+                        status.update(label=f"💎 서버 지연으로 재시도 중입니다... (시도 {attempt+1}/{max_retries})", state="running")
                         
                     response = st.session_state.chat_session.send_message(current_prompt)
                     
@@ -214,22 +197,20 @@ if need_generation:
                     if final_answer:
                         success = True
                         status.update(label="✅ 분석 완료!", state="complete")
-                        break  # 성공했으니 반복문 탈출!
+                        break  
                         
                 except Exception as e:
-                    # 에러가 났는데 아직 3번을 다 채우지 않았다면? -> 조금 쉬고 다시!
                     if attempt < max_retries - 1:
                         import time
                         time.sleep(1.5)
                         continue
                     else:
-                        # 💡 3번 다 실패했다면? -> 어떤 에러인지 정확히 보여주기
                         status.update(label=f"❌ 3회 시도 실패. (에러 원인: {str(e)})", state="error")
                         break
 
         # 6. 최종 답변 화면 출력 및 화면 새로고침
         if success and final_answer:
-            st.caption("🤖 **⚡ Flash** 모델이 답변을 생성했습니다.")
+            st.caption("🤖 **💎 Pro** 모델이 답변을 생성했습니다.")
             st.markdown(final_answer)
             st.session_state.messages.append({"role": "assistant", "content": final_answer})
             st.rerun()
