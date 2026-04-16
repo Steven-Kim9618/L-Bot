@@ -12,6 +12,19 @@ import time
 # ==========================================
 st.set_page_config(page_title="L-Bot", page_icon="⚖️", layout="wide")
 
+# ==========================================
+# 🎨 폰트 및 UI 스타일 설정 (Pretendard 적용)
+# ==========================================
+st.markdown("""
+<style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+html, body, [class*="css"], [class*="st-"] {
+    font-family: 'Pretendard', sans-serif !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # 보안 주의: 실제 서비스 시에는 st.secrets 사용 권장
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -150,17 +163,17 @@ if prompt := st.chat_input("질문을 입력하세요..."):
         
     need_generation = True  # 새 질문이 들어와도 생성 트리거 ON
 
-# 5. AI 답변 생성 (Flash 모델 전용)
+# 5. AI 답변 생성 (Flash 모델 전용, 3회 재시도 적용)
 if need_generation:
-    # 가장 마지막에 저장된 사용자의 질문을 가져옵니다.
     current_prompt = st.session_state.messages[-1]["content"]
 
     with st.chat_message("assistant"):
-        with st.status("⚡ Flash 모델이 법률 데이터를 분석 중입니다...", expanded=False) as status:
+        with st.status("⚡ Flash 모델이 법률 데이터를 분석 중입니다... (시도 1/3)", expanded=False) as status:
             
             final_answer = ""
+            success = False
+            max_retries = 3  # 💡 최대 3번 시도!
             
-            # Flash 모델 전용 세션 생성 (없을 경우에만 1회 생성)
             if "chat_session" not in st.session_state:
                 st.session_state.chat_session = client.chats.create(
                     model="gemini-2.5-flash",
@@ -171,32 +184,41 @@ if need_generation:
                     )
                 )
 
-            try:
-                # 메시지 전송 및 답변 수신
-                response = st.session_state.chat_session.send_message(current_prompt)
-                
-                # 답변 추출 (중복 방지)
-                if response.text:
-                    final_answer = response.text
-                else:
-                    temp_parts = [part.text for part in response.candidates[0].content.parts if part.text]
-                    if temp_parts:
-                        final_answer = temp_parts[-1]
-                
-                if final_answer:
-                    status.update(label="✅ 분석 완료!", state="complete")
-                else:
-                    status.update(label="❌ 답변을 생성하지 못했습니다. 버튼을 다시 눌러주세요.", state="error")
+            # 💡 3번 물고 늘어지는 반복문 시작
+            for attempt in range(max_retries):
+                try:
+                    # 두 번째 시도부터는 상태창 글씨 업데이트
+                    if attempt > 0:
+                        status.update(label=f"⚡ 서버 지연으로 재시도 중입니다... (시도 {attempt+1}/{max_retries})", state="running")
+                        
+                    response = st.session_state.chat_session.send_message(current_prompt)
                     
-            except Exception as e:
-                status.update(label=f"❌ 서버 오류 발생 (잠시 후 재시도 해주세요)", state="error")
+                    if response.text:
+                        final_answer = response.text
+                    else:
+                        temp_parts = [part.text for part in response.candidates[0].content.parts if part.text]
+                        if temp_parts:
+                            final_answer = temp_parts[-1]
+                    
+                    if final_answer:
+                        success = True
+                        status.update(label="✅ 분석 완료!", state="complete")
+                        break  # 성공했으니 반복문 탈출!
+                        
+                except Exception as e:
+                    # 에러가 났는데 아직 3번을 다 채우지 않았다면? -> 조금 쉬고 다시!
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1.5)
+                        continue
+                    else:
+                        # 💡 3번 다 실패했다면? -> 어떤 에러인지 정확히 보여주기
+                        status.update(label=f"❌ 3회 시도 실패. (에러 원인: {str(e)})", state="error")
+                        break
 
         # 6. 최종 답변 화면 출력 및 화면 새로고침
-        if final_answer:
+        if success and final_answer:
             st.caption("🤖 **⚡ Flash** 모델이 답변을 생성했습니다.")
             st.markdown(final_answer)
-            # 성공적으로 답변을 받았으므로 대화 기록에 저장
             st.session_state.messages.append({"role": "assistant", "content": final_answer})
-            
-            # 💡 [핵심] 성공 후 화면을 즉시 새로고침하여 쓸모없어진 '재시도 버튼'을 숨깁니다.
             st.rerun()
