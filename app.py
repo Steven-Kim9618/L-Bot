@@ -133,7 +133,7 @@ sys_instruct = """
 # 💡 세션 초기화: 코드가 꼬이지 않도록 여기서 딱 한 번만 Pro 모델로 세팅합니다!
 if "chat_session" not in st.session_state:
     st.session_state.chat_session = client.chats.create(
-        model="gemini-2.5-pro",  # 💎 할루시네이션을 잡기 위해 강력한 Pro 모델로 변경!
+        model="gemini-3-flash",  # 💎 할루시네이션을 잡기 위해 강력한 Pro 모델로 변경!
         config=types.GenerateContentConfig(
             system_instruction=sys_instruct,
             tools=[get_case_law, search_cases_by_keyword, get_legal_theory],
